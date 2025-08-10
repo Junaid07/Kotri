@@ -176,7 +176,7 @@ with mid:
 
 with st.sidebar:
     st.subheader("Data & Settings")
-    excel_path = st.text_input("Excel path on disk", value="data/New.xlsx")
+    excel_path = st.text_input("Excel path on disk", value="New.xlsx")
     sheet_name = st.text_input("Sheet name/index", value="Sheet1")
     threshold = st.number_input("Threshold (cusecs)", min_value=0, value=5000, step=500)
     st.markdown(
