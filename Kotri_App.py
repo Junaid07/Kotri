@@ -6,7 +6,7 @@ import streamlit as st
 from pathlib import Path
 
 # ---------------- App meta ----------------
-APP_NAME = "FlowInsight"
+APP_NAME = "FlowInsights downstream Kotri"
 APP_TAGLINE = "Ten-daily flow analyzer (Days below threshold + Surplus valuation)"
 PAGE_ICON = "💧"
 
@@ -167,12 +167,10 @@ def compute_surplus_by_period_across_months(tidy_df, period, threshold_cusecs):
     return pd.DataFrame(rows)
 
 # ---------------- UI ----------------
-left, mid, right = st.columns([1,2,1])
-with left:
-    st.image("logo.png", width=96, caption=APP_NAME)  # optional file
-with mid:
-    st.title(f"{APP_NAME} {PAGE_ICON}")
-    st.caption(APP_TAGLINE)
+# ---------------- UI ----------------
+st.title(f"{APP_NAME} {PAGE_ICON}")
+st.caption(APP_TAGLINE)
+
 
 with st.sidebar:
     st.subheader("Data & Settings")
