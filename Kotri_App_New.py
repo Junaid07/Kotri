@@ -6,7 +6,7 @@ import streamlit as st
 from pathlib import Path
 
 # ---------------- App meta ----------------
-APP_NAME = "FlowInsights downstream Kotri"
+APP_NAME = "Flow Insights Downstream Kotri"
 APP_TAGLINE = "Ten-daily flow analyzer (Days below threshold + Surplus valuation)"
 PAGE_ICON = "💧"
 
@@ -134,23 +134,17 @@ def compute_days_below_threshold_by_period(tidy_df, period, threshold_cusecs=500
 
 # --------- Surplus (only when ALL 3 dekads > threshold) ----------
 def month_surplus_maf_for_period(tidy_df, period, month_abbr, threshold_cusecs):
-    """Return (all_above, surplus_MAF) for this period+month.
-       all_above True iff ALL three dekad averages > threshold.
-       surplus_MAF = sum_over_dekads( (avg - thresh) * dekad_days ) * CUSEC_DAY_TO_MAF
-    """
+    """Return (all_above, surplus_MAF) for this period+month."""
     month_abbr = month_abbr.upper()
     syear, eyear = parse_period(period)
     lengths = dekad_lengths(month_abbr, syear, eyear)
-
     sub = tidy_df[(tidy_df["Period"] == period) & (tidy_df["Month"] == month_abbr)]
     if sub.empty or set(sub["Dekad"]) != {1,2,3}:
         return False, 0.0
-
     avgs_cusecs = [float(a)*1000.0 for a in sub.sort_values("Dekad")["Avg_1000_cusecs"].tolist()]
-    all_above = all(a > threshold_cusecs for a in avgs_cusecs)
+    all_above = all(a > threshold_cusecs for a in avgs_cusecs)  # strict ">"
     if not all_above:
         return False, 0.0
-
     surplus_cusec_days = sum((a - threshold_cusecs) * d for a, d in zip(avgs_cusecs, lengths))
     surplus_maf = surplus_cusec_days * CUSEC_DAY_TO_MAF
     return True, surplus_maf
@@ -169,15 +163,18 @@ def compute_surplus_by_period_across_months(tidy_df, period, threshold_cusecs):
         rows.append({"Period": period, "Month": m, "AllDaysAbove": ok, "Surplus_MAF": maf})
     return pd.DataFrame(rows)
 
-def compute_total_surplus_all(tidy_df, threshold_cusecs):
-    """Total surplus MAF across ALL months & periods meeting the rule."""
-    total = 0.0
-    for p in tidy_df["Period"].unique():
+def compute_surplus_all_df(tidy_df, threshold_cusecs):
+    """Return DF of all (Period, Month) with flags/MAF for the rule."""
+    rows = []
+    for p in sorted(tidy_df["Period"].unique().tolist(), key=lambda x: parse_period(x)[0]):
         for m in MONTHS:
             ok, maf = month_surplus_maf_for_period(tidy_df, p, m, threshold_cusecs)
-            if ok:
-                total += maf
-    return total
+            rows.append({"Period": p, "Month": m, "AllDaysAbove": ok, "Surplus_MAF": maf})
+    return pd.DataFrame(rows)
+
+def compute_total_surplus_all(tidy_df, threshold_cusecs):
+    df = compute_surplus_all_df(tidy_df, threshold_cusecs)
+    return df.loc[df["AllDaysAbove"], "Surplus_MAF"].sum()
 
 # --------- formatting helpers ----------
 def fmt_money(x):
@@ -354,8 +351,10 @@ with tab4:
     st.subheader("Surplus water above threshold → MAF → Value")
     st.caption("Counting only months/periods where **all three ten-daily averages** exceed the threshold.")
 
-    # Pre-compute total loss across ALL months & periods (for this threshold)
-    total_maf_all = compute_total_surplus_all(tidy, threshold)
+    # Pre-compute totals & rankings across ALL months & periods (for this threshold)
+    df_all = compute_surplus_all_df(tidy, threshold)
+    qual_all = df_all[df_all["AllDaysAbove"]].copy()
+    total_maf_all = qual_all["Surplus_MAF"].sum()
     total_val_all = total_maf_all * cost_per_maf
 
     colA, colB = st.columns(2)
@@ -423,11 +422,37 @@ with tab4:
                 )
 
     st.divider()
+    # Overall totals
     st.markdown(
         f"**Total across ALL months & periods meeting the surplus rule:** "
         f"{total_maf_all:,.3f} MAF  |  **Value:** {fmt_money(total_val_all)}  "
         f"(Cost/MAF = {cost_per_maf_b:.1f} B USD)"
     )
+
+    # NEW: which Month and which Period contribute the most to total cost?
+    if total_maf_all > 0 and not qual_all.empty:
+        month_totals = qual_all.groupby("Month")["Surplus_MAF"].sum()
+        period_totals = qual_all.groupby("Period")["Surplus_MAF"].sum()
+
+        top_month = month_totals.idxmax()
+        top_month_val = month_totals.max() * cost_per_maf
+        top_month_share = pct_part(top_month_val, total_val_all)
+
+        top_period = period_totals.idxmax()
+        top_period_val = period_totals.max() * cost_per_maf
+        top_period_share = pct_part(top_period_val, total_val_all)
+
+        st.markdown(
+            f"**Largest cost contribution (by month):** **{top_month}** — {fmt_money(top_month_val)} "
+            f"(**{top_month_share}** of total)"
+        )
+        st.markdown(
+            f"**Largest cost contribution (by period):** **{top_period}** — {fmt_money(top_period_val)} "
+            f"(**{top_period_share}** of total)"
+        )
+    else:
+        st.info("No qualifying surplus months found at this threshold.")
+
     st.markdown(
         "<small><b>Note:</b> Using ten-daily averages as a proxy for ‘always above daily requirement’. "
         "We count a month only if <i>all three</i> dekad averages exceed the threshold. "
